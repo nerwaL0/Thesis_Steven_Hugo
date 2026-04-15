@@ -1,6 +1,8 @@
 #include "ac_control.h"
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
+#include "firebase_manager.h"
+#include <time.h>
 
 // Import semua AC populer di Indonesia
 #include <ir_Daikin.h> //14
@@ -29,11 +31,14 @@ void setupAC() {
     acGree.begin();
 }
 
-void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int mode) {
+void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int mode, unsigned long startTime, uint64_t commandTimestamp, unsigned long networkLatencyMs) {
     Serial.printf("\n--- TRANSMIT: ID:%d, Pwr:%d, Temp:%d, Fan:%d, Swing:%d, Mode:%d ---\n", id, powerStatus, temp, fan, swing, mode);
 
+    unsigned long t_config_start = millis();
+    unsigned long t_before_send, t_after_send;
+
     switch (id) {
-        case 14: // DAIKIN
+        case 14: { // DAIKIN
             if (powerStatus) {
                 acDaikin.on();
                 acDaikin.setTemp(temp);
@@ -52,9 +57,16 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
             } else {
                 acDaikin.off();
             }
+            unsigned long t_before_send = millis();
             acDaikin.send();
+            unsigned long t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
-        case 3: // PANASONIC
+        }
+        case 3: { // PANASONIC
             if (powerStatus) {
                 acPanasonic.on();
                 acPanasonic.setTemp(temp);
@@ -73,9 +85,16 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
             } else {
                 acPanasonic.off();
             }
+            t_before_send = millis();
             acPanasonic.send();
+            t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
-       case 27: // SHARP
+        }
+        case 27: { // SHARP
             if (powerStatus) {
                 acSharp.on();
                 acSharp.setMode(kSharpAcCool); // Paksa ke mode Cool
@@ -95,9 +114,16 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
             } else {
                 acSharp.off();
             }
+            t_before_send = millis();
             acSharp.send();
+            t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
-        case 6:  // LG
+        }
+        case 6: { // LG
             if (powerStatus) {
                 acLG.on();
                 acLG.setMode(kLgAcCool); // Penting: Agar suhu bisa berubah
@@ -117,9 +143,16 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
             } else {
                 acLG.off();
             }
+            t_before_send = millis();
             acLG.send();
+            t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
-        case 11: // SAMSUNG
+        }
+        case 11: { // SAMSUNG
             if (powerStatus) {
                 acSamsung.on();
                 acSamsung.setMode(kSamsungAcCool);
@@ -139,38 +172,75 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
             } else {
                 acSamsung.off();
             }
+            t_before_send = millis();
             acSamsung.send();
+            t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
-        case 32: // GREE
-    if (powerStatus) {
-        acGree.on();
-        acGree.setMode(kGreeCool); // Kunci di mode Cool
-        acGree.setTemp(temp);      // Set suhu dinamis
-        // Mode Mapping
-        if (mode == 0) acGree.setMode(kGreeAuto);
-        else if (mode == 2) acGree.setMode(kGreeDry);
-        else if (mode == 3) acGree.setMode(kGreeFan);
-        else acGree.setMode(kGreeCool); // Default ke Cool
-        // Mapping Fan Speed Gree (0-3)
-        switch(fan) {
-            case 0: acGree.setFan(kGreeFanAuto); break;
-            case 1: acGree.setFan(kGreeFanMin); break;
-            case 2: acGree.setFan(kGreeFanMed); break;
-            case 3: acGree.setFan(kGreeFanMax); break;
-            default: acGree.setFan(kGreeFanAuto); break;
         }
+        case 32: { // GREE
+            if (powerStatus) {
+                acGree.on();
+                acGree.setMode(kGreeCool); // Kunci di mode Cool
+                acGree.setTemp(temp);      // Set suhu dinamis
+                // Mode Mapping
+                if (mode == 0) acGree.setMode(kGreeAuto);
+                else if (mode == 2) acGree.setMode(kGreeDry);
+                else if (mode == 3) acGree.setMode(kGreeFan);
+                else acGree.setMode(kGreeCool); // Default ke Cool
+                // Mapping Fan Speed Gree (0-3)
+                switch(fan) {
+                    case 0: acGree.setFan(kGreeFanAuto); break;
+                    case 1: acGree.setFan(kGreeFanMin); break;
+                    case 2: acGree.setFan(kGreeFanMed); break;
+                    case 3: acGree.setFan(kGreeFanMax); break;
+                    default: acGree.setFan(kGreeFanAuto); break;
+                }
 
-        // Swing Vertical
-        acGree.setSwingVertical(swing, kGreeSwingAuto);
-    } else {
-        acGree.off();
-    }
-    acGree.send();
-    break;
+                // Swing Vertical
+                acGree.setSwingVertical(swing, kGreeSwingAuto);
+            } else {
+                acGree.off();
+            }
+            t_before_send = millis();
+            acGree.send();
+            t_after_send = millis();
+            Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
+            Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
+            Serial.printf("  Total AC function: %lu ms\n", t_after_send - t_config_start);
+            Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
+            break;
+        }
         default:
             Serial.println("Protocol ID tidak terdaftar!");
             return;
     }
     Serial.println("Sinyal Berhasil Terkirim!");
     delay(200); // Delay kecil untuk memastikan sinyal terkirim sempurna sebelum perintah berikutnya
+    
+    // Log execution with latency confirmation back to Firebase
+    unsigned long totalProcessingTime = millis() - startTime;
+    
+    // Estimate polling wait time (if command_timestamp exists)
+    uint64_t estimatedFullLatency = 0;
+    uint64_t estimatedPollingWait = 0;
+    if (commandTimestamp > 0) {
+        uint64_t executedTime = (uint64_t)time(nullptr) * 1000;
+        estimatedFullLatency = executedTime - commandTimestamp;
+        if (estimatedFullLatency > (totalProcessingTime + networkLatencyMs)) {
+            estimatedPollingWait = estimatedFullLatency - totalProcessingTime - networkLatencyMs;
+        }
+    }
+    
+    Serial.printf("\n=== LATENCY SUMMARY ===\n");
+    Serial.printf("Polling Wait (check interval): %llu ms\n", estimatedPollingWait);
+    Serial.printf("Network Latency: %lu ms\n", networkLatencyMs);
+    Serial.printf("ESP32 Local Processing: %lu ms\n", totalProcessingTime);
+    Serial.printf("TOTAL (Firebase → IR): %llu ms\n", estimatedPollingWait + networkLatencyMs + totalProcessingTime);
+    Serial.printf("Sending full latency confirmation to Firebase...\n");
+    logLatencyConfirmation(totalProcessingTime, commandTimestamp, networkLatencyMs);
+    Serial.printf("=======================\n\n");
 }

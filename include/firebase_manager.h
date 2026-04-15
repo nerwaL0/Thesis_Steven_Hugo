@@ -7,4 +7,5 @@
 void setupFirebase();
 void handleFirebaseUpdates();
 void uploadSensorData(float temp, float hum);
+void logLatencyConfirmation(unsigned long processingTimeMs, uint64_t commandTimestamp, unsigned long networkLatencyMs);
 #endif

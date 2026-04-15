@@ -3,24 +3,55 @@
 #include <Ticker.h>
 
 Ticker ticker;
-const int LED_PIN = 2; // LED internal untuk indikasi status WiFi
-const int RESET_PIN = 0; 
-unsigned long pressStartTime = 0;
-bool isPressing = false;
-int currentBlinkPhase = -1; // -1: Tidak berkedip, 0: Lambat, 1: Sedang, 2: Cepat, 3: Sangat Cepat (Reset)
 
-void tick() {
-    int state = digitalRead(LED_PIN);
-    digitalWrite(LED_PIN, !state); // Toggle LED
+// ── RGB LED Pins (4-pin common cathode) ─────────────────────────────────────
+// Wiring: R → GPIO25, G → GPIO26, B → GPIO27, Common (−) → GND
+const int LED_R = 25;
+const int LED_G = 26;
+const int LED_B = 27;
+
+const int RESET_PIN = 0;
+unsigned long pressStartTime = 0;
+bool isPressing    = false;
+int currentBlinkPhase = -1; // -1: Normal, 0-2: Button hold progress, 3: Reset
+
+// WiFi state tracking
+bool wifiConnected = false;
+
+// Toggle state used inside ticker callbacks
+bool toggleState = false;
+
+// ── RGB Helper ───────────────────────────────────────────────────────────────
+void setColor(bool r, bool g, bool b) {
+    digitalWrite(LED_R, r ? HIGH : LOW);
+    digitalWrite(LED_G, g ? HIGH : LOW);
+    digitalWrite(LED_B, b ? HIGH : LOW);
 }
+
+// ── Ticker Callbacks ─────────────────────────────────────────────────────────
+
+// Blinking Red (0.5s intervals)
+void tickRed() {
+    toggleState = !toggleState;
+    if (toggleState) setColor(true, false, false);  // Red ON
+    else             setColor(false, false, false);  // OFF
+}
+
+// ── Setup ────────────────────────────────────────────────────────────────────
 void setupNetwork() {
-    pinMode(LED_PIN, OUTPUT);
+    pinMode(LED_R, OUTPUT);
+    pinMode(LED_G, OUTPUT);
+    pinMode(LED_B, OUTPUT);
     pinMode(RESET_PIN, INPUT_PULLUP);
-    ticker.attach(0.5, tick); // LED berkedip setiap 500ms untuk indikasi WiFi
-    
+
+    // Initial state: Red blinking while connecting to WiFi (or after reset)
+    toggleState = false;
+    ticker.attach(0.5, tickRed);
+
     WiFiManager wm;
-    // menambahkan css custom jika diperlukan
+    // CSS custom untuk portal WiFi
     const char* custom_html = R"rawliteral(
+
 <style>
 
 /* ===== GLOBAL SCALE ===== */
@@ -119,51 +150,66 @@ document.addEventListener('DOMContentLoaded', function () {
 )rawliteral";
 
     wm.setCustomHeadElement(custom_html);
+
     // Autoconnect akan memblokir sampai terhubung atau timeout
-    if(!wm.autoConnect("SmartRemote_Setup")) {
+    if (!wm.autoConnect("SmartRemote_Setup")) {
         Serial.println("Gagal terhubung, restarting...");
         ESP.restart();
     }
-    ticker.detach(); // Berhenti berkedip setelah terhubung
-    digitalWrite(LED_PIN, HIGH); // LED menyala solid untuk indikasi sukses
+
+    // WiFi connected -> Solid green
+    ticker.detach();
+    toggleState = false;
+    setColor(false, true, false);
+    wifiConnected = true;
     Serial.println("Terhubung ke WiFi!");
 }
 
+// ── Reset Button ─────────────────────────────────────────────────────────────
 void checkResetButton() {
     if (digitalRead(RESET_PIN) == LOW) {
         if (!isPressing) {
             pressStartTime = millis();
             isPressing = true;
-            Serial.println("Tombol Boot ditekan, tahan 5 detik untuk reset...");
-        } 
-        unsigned long elapsed = millis() - pressStartTime;
-        
-        int newPhase = (elapsed < 2000) ? 0 : (elapsed < 3500) ? 1 : 2;
-        if (elapsed >= 5000) newPhase = 3;
-
-        if (newPhase != currentBlinkPhase) {
-            currentBlinkPhase = newPhase;
+            Serial.println("Tombol ditekan, tahan 5 detik untuk reset...");
+            // Show solid yellow while button is pressed
             ticker.detach();
+            toggleState = false;
+            setColor(true, true, false);  // Yellow ON
+            currentBlinkPhase = 0;
+        }
 
-            if (currentBlinkPhase == 0) ticker.attach(0.4, tick);
-            else if (currentBlinkPhase == 1) ticker.attach(0.2, tick);
-            else if (currentBlinkPhase == 2) ticker.attach(0.05, tick);
-            else if (currentBlinkPhase == 3) {
-            Serial.println("Mereset WiFi...");
+        unsigned long elapsed = millis() - pressStartTime;
+
+        // Check if button held for 5 seconds
+        if (elapsed >= 5000 && currentBlinkPhase != 3) {
+            currentBlinkPhase = 3;
+            ticker.detach();
+            toggleState = false;
+            // Start blinking red (0.5s intervals)
+            ticker.attach(0.5, tickRed);
+            Serial.println("5 detik tercapai! Reset WiFi...");
+            delay(1500); // Beri waktu untuk melihat efek blinking red
             WiFiManager wm;
             wm.resetSettings();
-            delay(1000); // Beri waktu untuk reset sebelum restart
+            delay(500);
             ESP.restart();
-        }    
-    }
-} else {
+        }
+
+    } else {
+        // Button released before 5s -> cancel, return to solid green
         if (isPressing) {
             Serial.println("Reset dibatalkan.");
             isPressing = false;
+            currentBlinkPhase = -1;
+            ticker.detach();
+            toggleState = false;
+            setColor(false, true, false);  // Solid green (normal state)
         }
     }
 }
 
+// ── Device ID ────────────────────────────────────────────────────────────────
 String getDeviceID() {
     String mac = WiFi.macAddress();
     mac.replace(":", "");

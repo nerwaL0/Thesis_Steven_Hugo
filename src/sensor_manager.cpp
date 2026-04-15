@@ -16,10 +16,8 @@ void setupSensor() {
 }
 
 void readAndUploadSensor() {
-    // Cek interval 2 menit
     if (millis() - lastSensorRead >= SENSOR_INTERVAL) {
         lastSensorRead = millis();
-
     float hum, temp;
     int retries = 3;
     while (retries--) {
