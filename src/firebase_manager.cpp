@@ -16,48 +16,32 @@ String userPath;
 int lastProtocol = -1, lastTemp = -1, lastFan = -1, lastMode = -1;
 bool lastPower = false, lastSwing = false, isFirstRun = true;
 
-// Struct untuk menampung perintah secara instan dari Stream
+// REVISI: Inisialisasi struct dengan nilai default 0 untuk mencegah angka gaib
 struct ACCommand {
     bool ready = false;
     uint64_t timestamp = 0;
     int protocol = 0;
     bool power = false;
-    int temp = 0;
+    int temp = 24; // Default suhu aman
     int fan = 0;
     bool swing = false;
-    int mode = 0;
+    int mode = 1;  // Default Cool
     unsigned long received_time = 0;
 } currentCmd;
 
 String createPath(String base, String child) {
-  String result = base;
-  result += child;
-  return result;
+  return base + child;
 }
-
 void streamCallback(StreamData data) {
-    currentCmd.received_time = millis(); // Catat waktu kedatangan paket
+    // DIAGNOSIS: Setiap kali ada perubahan (apapun itu), kita hanya memberi sinyal
+    // agar loop utama melakukan sinkronisasi ulang secara penuh (Full Sync).
+    // Ini mencegah "Stale Data" atau perintah yang tercampur antara data lama dan baru.
+    currentCmd.timestamp = 0; 
+    currentCmd.ready = true;
     
-    // Pastikan data yang masuk adalah objek JSON utuh dari aplikasi
-    if (data.dataType() == "json") {
-        FirebaseJson json;
-        json.setJsonData(data.jsonString());
-        FirebaseJsonData result;
-
-        json.get(result, "command_timestamp"); currentCmd.timestamp = (uint64_t)result.doubleValue;
-        json.get(result, "protocol_id"); currentCmd.protocol = result.intValue;
-        json.get(result, "power"); currentCmd.power = result.boolValue;
-        json.get(result, "temp"); currentCmd.temp = result.intValue;
-        json.get(result, "fan_speed"); currentCmd.fan = result.intValue;
-        json.get(result, "swing"); currentCmd.swing = result.boolValue;
-        json.get(result, "mode"); currentCmd.mode = result.intValue;
-
-        currentCmd.ready = true; // Beri sinyal ke main loop untuk mengeksekusi IR
-    } else {
-        // Mekanisme aman: Jika struktur JSON parsial, beri sinyal untuk di-fetch ulang
-        currentCmd.timestamp = 0; 
-        currentCmd.ready = true;
-    }
+    // Debug untuk memantau aktivitas stream di Serial Monitor
+    Serial.print(F("Aktivitas Firebase Terdeteksi di path: "));
+    Serial.println(data.dataPath());
 }
 
 void streamTimeoutCallback(bool timeout) {
@@ -104,52 +88,38 @@ void handleFirebaseUpdates() {
     if (currentCmd.ready) {
         currentCmd.ready = false; 
         
-        if (currentCmd.timestamp == 0) {
-            // Fallback: Jika data parsial, gunakan metode tarik data (GET) yang akurat
-            unsigned long t_before = millis();
-            
-            if (Firebase.getJSON(fbdo, userPath.c_str())) {
-                unsigned long t_after = millis();
-                unsigned long network_latency = t_after - t_before;
-                
-                FirebaseJson &json = fbdo.jsonObject();
-                FirebaseJsonData result;
+        unsigned long t_before = millis();
 
-                json.get(result, "command_timestamp"); uint64_t firebaseTimestamp = (uint64_t)result.doubleValue;
-                json.get(result, "protocol_id"); int cProtocol = result.intValue;
-                json.get(result, "power"); bool cPower = result.boolValue;
-                json.get(result, "temp"); int cTemp = result.intValue;
-                json.get(result, "fan_speed"); int cFan = result.intValue;
-                json.get(result, "swing"); bool cSwing = result.boolValue;
-                json.get(result, "mode"); int cMode = result.intValue;
+       if (Firebase.getJSON(fbdo, userPath.c_str())) {
+            FirebaseJson &json = fbdo.jsonObject();
+            FirebaseJsonData result;
+                
+            // Pastikan protocol_id valid sebelum diproses
+            json.get(result, "protocol_id"); int cProtocol = result.intValue;
+            if (cProtocol <= 0) return; 
 
-                if (isFirstRun || cProtocol != lastProtocol || cPower != lastPower || 
-                    cTemp != lastTemp || cFan != lastFan || cSwing != lastSwing || cMode != lastMode) {
-                    
-                    tembakSinyalAC(cProtocol, cPower, cTemp, cFan, cSwing, cMode, t_before, firebaseTimestamp, network_latency);
-                    
-                    lastProtocol = cProtocol; lastPower = cPower; lastTemp = cTemp;
-                    lastFan = cFan; lastSwing = cSwing; lastMode = cMode;
-                    isFirstRun = false;
-                }
-            }
-        } else {
-            // Jalur Utama (Kecepatan Maksimal): Data sudah didapat dari Callback
-            if (isFirstRun || currentCmd.protocol != lastProtocol || currentCmd.power != lastPower || 
-                currentCmd.temp != lastTemp || currentCmd.fan != lastFan || currentCmd.swing != lastSwing || currentCmd.mode != lastMode) {
+            json.get(result, "command_timestamp"); uint64_t firebaseTimestamp = (uint64_t)result.doubleValue;
+            json.get(result, "power");     bool cPower = result.boolValue;
+            json.get(result, "temp");      int cTemp = result.intValue;
+            json.get(result, "fan_speed"); int cFan = result.intValue;
+            json.get(result, "swing");     bool cSwing = result.boolValue;
+            json.get(result, "mode");      int cMode = result.intValue;
+
+            // Hanya tembak IR jika ada perubahan data asli dibandingkan data terakhir
+            if (isFirstRun || cProtocol != lastProtocol || cPower != lastPower || 
+                cTemp != lastTemp || cFan != lastFan || cSwing != lastSwing || cMode != lastMode) {
                 
-                unsigned long processing_latency = millis() - currentCmd.received_time;
+                unsigned long network_latency = millis() - t_before;
+                tembakSinyalAC(cProtocol, cPower, cTemp, cFan, cSwing, cMode, t_before, firebaseTimestamp, network_latency);
                 
-                tembakSinyalAC(currentCmd.protocol, currentCmd.power, currentCmd.temp, currentCmd.fan, currentCmd.swing, currentCmd.mode, currentCmd.received_time, currentCmd.timestamp, processing_latency);
-                
-                lastProtocol = currentCmd.protocol; lastPower = currentCmd.power; lastTemp = currentCmd.temp;
-                lastFan = currentCmd.fan; lastSwing = currentCmd.swing; lastMode = currentCmd.mode;
+                // Simpan status terakhir
+                lastProtocol = cProtocol; lastPower = cPower; lastTemp = cTemp;
+                lastFan = cFan; lastSwing = cSwing; lastMode = cMode;
                 isFirstRun = false;
             }
         }
     }
 }
-
 void uploadSensorData(float temp, float hum) {
     // BUAT PATH BARU KHUSUS SENSOR (Pisahkan dari userPath/settings)
     String sensorPath = "/devices/" + getDeviceID() + "/sensors"; 

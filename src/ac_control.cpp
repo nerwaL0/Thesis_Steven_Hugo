@@ -25,6 +25,7 @@ IRGreeAC acGree(kIrLed);
 void setupAC() {
     acDaikin.begin();
     acPanasonic.begin();
+    acPanasonic.setModel(kPanasonicCkp); // Sesuaikan dengan model AC Panasonic yang digunakan
     acSharp.begin();
     acLG.begin();
     acSamsung.begin();
@@ -32,6 +33,8 @@ void setupAC() {
 }
 
 void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int mode, unsigned long startTime, uint64_t commandTimestamp, unsigned long networkLatencyMs) {
+    if (id <= 0) return;
+
     Serial.printf("\n--- TRANSMIT: ID:%d, Pwr:%d, Temp:%d, Fan:%d, Swing:%d, Mode:%d ---\n", id, powerStatus, temp, fan, swing, mode);
 
     unsigned long t_config_start = millis();
@@ -86,7 +89,7 @@ void tembakSinyalAC(int id, bool powerStatus, int temp, int fan, bool swing, int
                 acPanasonic.off();
             }
             t_before_send = millis();
-            acPanasonic.send();
+            acPanasonic.send(2);
             t_after_send = millis();
             Serial.printf("  Config time: %lu ms\n", t_before_send - t_config_start);
             Serial.printf("  IR Send time: %lu ms\n", t_after_send - t_before_send);
