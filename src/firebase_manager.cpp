@@ -6,20 +6,64 @@
 #include <time.h>
 
 FirebaseData fbdo;
+FirebaseData streamData; // Objek khusus agar jalur Stream tidak bertabrakan dengan upload sensor
 FirebaseAuth auth;
 FirebaseConfig config;
 
 String userPath;
-unsigned long lastFirebaseCheck = 0;
 
-// Variabel status terakhir (Encapsulated)
+// Variabel status terakhir
 int lastProtocol = -1, lastTemp = -1, lastFan = -1, lastMode = -1;
 bool lastPower = false, lastSwing = false, isFirstRun = true;
+
+// Struct untuk menampung perintah secara instan dari Stream
+struct ACCommand {
+    bool ready = false;
+    uint64_t timestamp = 0;
+    int protocol = 0;
+    bool power = false;
+    int temp = 0;
+    int fan = 0;
+    bool swing = false;
+    int mode = 0;
+    unsigned long received_time = 0;
+} currentCmd;
 
 String createPath(String base, String child) {
   String result = base;
   result += child;
   return result;
+}
+
+void streamCallback(StreamData data) {
+    currentCmd.received_time = millis(); // Catat waktu kedatangan paket
+    
+    // Pastikan data yang masuk adalah objek JSON utuh dari aplikasi
+    if (data.dataType() == "json") {
+        FirebaseJson json;
+        json.setJsonData(data.jsonString());
+        FirebaseJsonData result;
+
+        json.get(result, "command_timestamp"); currentCmd.timestamp = (uint64_t)result.doubleValue;
+        json.get(result, "protocol_id"); currentCmd.protocol = result.intValue;
+        json.get(result, "power"); currentCmd.power = result.boolValue;
+        json.get(result, "temp"); currentCmd.temp = result.intValue;
+        json.get(result, "fan_speed"); currentCmd.fan = result.intValue;
+        json.get(result, "swing"); currentCmd.swing = result.boolValue;
+        json.get(result, "mode"); currentCmd.mode = result.intValue;
+
+        currentCmd.ready = true; // Beri sinyal ke main loop untuk mengeksekusi IR
+    } else {
+        // Mekanisme aman: Jika struktur JSON parsial, beri sinyal untuk di-fetch ulang
+        currentCmd.timestamp = 0; 
+        currentCmd.ready = true;
+    }
+}
+
+void streamTimeoutCallback(bool timeout) {
+    if (timeout) {
+        Serial.println("Koneksi Stream Timeout, menyambungkan kembali...");
+    }
 }
 
 void setupFirebase() {
@@ -37,7 +81,6 @@ void setupFirebase() {
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
     
-    // Sync ESP32 clock with network time with firebase token generation requires a valid timestamp
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.println("Syncing with NTP server...");
     time_t now = time(nullptr);
@@ -46,82 +89,76 @@ void setupFirebase() {
         now = time(nullptr);
     }
     Serial.println("Clock synced with NTP");
+
+    if (Firebase.beginStream(streamData, userPath.c_str())) {
+        Serial.println("Firebase Stream Aktif! Sistem siap merespons instan.");
+        Firebase.setStreamCallback(streamData, streamCallback, streamTimeoutCallback);
+    } else {
+        Serial.print("Gagal memulai Stream: ");
+        Serial.println(streamData.errorReason());
+    }
 }
 
 void handleFirebaseUpdates() {
-    // cek tiap 500ms dari firebase dan 5000ms sejak boot untuk menghindari pembacaan data yang tidak stabil saat baru mulai
-    if (millis() < 5000) return; 
-    if (millis() - lastFirebaseCheck < 500) return;
-    lastFirebaseCheck = millis();   
-
-    if (Firebase.ready()) {
-        // ambil seluruh objek settings sekaligus
-        unsigned long t_before_getjson = millis();  // Measure network latency
-        if (Firebase.getJSON(fbdo, userPath.c_str())) {
-            unsigned long t_after_getjson = millis();  // After Firebase response
-            unsigned long network_latency = t_after_getjson - t_before_getjson;
+    // Fungsi ini dipanggil ribuan kali per detik oleh loop(), tetapi hanya berjalan jika ada flag 'ready'
+    if (currentCmd.ready) {
+        currentCmd.ready = false; 
+        
+        if (currentCmd.timestamp == 0) {
+            // Fallback: Jika data parsial, gunakan metode tarik data (GET) yang akurat
+            unsigned long t_before = millis();
             
-            unsigned long t_start = millis();  // Step 1: Start timing
-            
-            FirebaseJson &json = fbdo.jsonObject();
-            FirebaseJsonData result;
-
-            // Get Firebase server timestamp (use uint64_t for full precision)
-            json.get(result, "command_timestamp");
-            uint64_t firebaseTimestamp = (uint64_t)result.doubleValue;
-            
-            // DEBUG: Show what we're reading
-            Serial.printf("DEBUG: command_timestamp value from Firebase: %llu\n", firebaseTimestamp);
-            
-            unsigned long t_after_timestamp = millis();  // Step 2: After getting timestamp
-
-            // Parsing data
-            json.get(result, "protocol_id"); int cProtocol = result.intValue;
-            json.get(result, "power"); bool cPower = result.boolValue;
-            json.get(result, "temp"); int cTemp = result.intValue;
-            json.get(result, "fan_speed"); int cFan = result.intValue;
-            json.get(result, "swing"); bool cSwing = result.boolValue;
-            json.get(result, "mode"); int cMode = result.intValue;
-
-            unsigned long t_after_parsing = millis();  // Step 3: After parsing all values
-            
-            // logika pengecekan data
-            if (isFirstRun || cProtocol != lastProtocol || cPower != lastPower || 
-                cTemp != lastTemp || cFan != lastFan || cSwing != lastSwing || cMode != lastMode) {
+            if (Firebase.getJSON(fbdo, userPath.c_str())) {
+                unsigned long t_after = millis();
+                unsigned long network_latency = t_after - t_before;
                 
-                // Pass BOTH local time and Firebase command timestamp, plus network latency
-                tembakSinyalAC(cProtocol, cPower, cTemp, cFan, cSwing, cMode, t_start, firebaseTimestamp, network_latency);
+                FirebaseJson &json = fbdo.jsonObject();
+                FirebaseJsonData result;
+
+                json.get(result, "command_timestamp"); uint64_t firebaseTimestamp = (uint64_t)result.doubleValue;
+                json.get(result, "protocol_id"); int cProtocol = result.intValue;
+                json.get(result, "power"); bool cPower = result.boolValue;
+                json.get(result, "temp"); int cTemp = result.intValue;
+                json.get(result, "fan_speed"); int cFan = result.intValue;
+                json.get(result, "swing"); bool cSwing = result.boolValue;
+                json.get(result, "mode"); int cMode = result.intValue;
+
+                if (isFirstRun || cProtocol != lastProtocol || cPower != lastPower || 
+                    cTemp != lastTemp || cFan != lastFan || cSwing != lastSwing || cMode != lastMode) {
+                    
+                    tembakSinyalAC(cProtocol, cPower, cTemp, cFan, cSwing, cMode, t_before, firebaseTimestamp, network_latency);
+                    
+                    lastProtocol = cProtocol; lastPower = cPower; lastTemp = cTemp;
+                    lastFan = cFan; lastSwing = cSwing; lastMode = cMode;
+                    isFirstRun = false;
+                }
+            }
+        } else {
+            // Jalur Utama (Kecepatan Maksimal): Data sudah didapat dari Callback
+            if (isFirstRun || currentCmd.protocol != lastProtocol || currentCmd.power != lastPower || 
+                currentCmd.temp != lastTemp || currentCmd.fan != lastFan || currentCmd.swing != lastSwing || currentCmd.mode != lastMode) {
                 
-                unsigned long t_after_transmit = millis();  // Step 4: After IR transmission
+                unsigned long processing_latency = millis() - currentCmd.received_time;
                 
-                // Print timing breakdown
-                Serial.printf("\n=== TIMING BREAKDOWN ===\n");
-                Serial.printf("Network Latency (Firebase GET): %lu ms\n", network_latency);
-                Serial.printf("Get Timestamp: %lu ms\n", t_after_timestamp - t_start);
-                Serial.printf("Parse All Data: %lu ms\n", t_after_parsing - t_after_timestamp);
-                Serial.printf("Firebase->Parse Total: %lu ms\n", t_after_parsing - t_start);
-                Serial.printf("Config+Transmit in AC func: %lu ms\n", t_after_transmit - t_after_parsing);
-                Serial.printf("ESP32 Total (after network): %lu ms\n", t_after_transmit - t_start);
-                Serial.printf("Command Timestamp from Firebase: %lu\n", firebaseTimestamp);
-                Serial.printf("======================\n\n");
+                tembakSinyalAC(currentCmd.protocol, currentCmd.power, currentCmd.temp, currentCmd.fan, currentCmd.swing, currentCmd.mode, currentCmd.received_time, currentCmd.timestamp, processing_latency);
                 
-                lastProtocol = cProtocol; 
-                lastPower = cPower; 
-                lastTemp = cTemp;
-                lastFan = cFan; 
-                lastSwing = cSwing;
-                lastMode = cMode;
+                lastProtocol = currentCmd.protocol; lastPower = currentCmd.power; lastTemp = currentCmd.temp;
+                lastFan = currentCmd.fan; lastSwing = currentCmd.swing; lastMode = currentCmd.mode;
                 isFirstRun = false;
             }
         }
     }
 }
+
 void uploadSensorData(float temp, float hum) {
+    // BUAT PATH BARU KHUSUS SENSOR (Pisahkan dari userPath/settings)
+    String sensorPath = "/devices/" + getDeviceID() + "/sensors"; 
+
     if (Firebase.ready()) {
-        if (Firebase.setFloat(fbdo, createPath(userPath, "/read_temp").c_str(), temp)) {
+        if (Firebase.setFloat(fbdo, sensorPath + "/read_temp", temp)) {
             Serial.println(F("Data Suhu berhasil diunggah."));
-     }
-        if (Firebase.setFloat(fbdo, createPath(userPath, "/read_hum").c_str(), hum)) {
+        }
+        if (Firebase.setFloat(fbdo, sensorPath + "/read_hum", hum)) {
             Serial.println(F("Data Kelembapan berhasil diunggah."));
         }
     }
@@ -129,30 +166,23 @@ void uploadSensorData(float temp, float hum) {
 
 void logLatencyConfirmation(unsigned long processingTimeMs, uint64_t commandTimestamp, unsigned long networkLatencyMs) {
     if (Firebase.ready()) {
-        // SAFETY CHECK: Only log if we have a valid command timestamp
-        // If commandTimestamp is 0/missing, skip writing to avoid corrupting data
         if (commandTimestamp == 0) {
-            Serial.println("⚠️  WARNING: command_timestamp is 0 - skipping latency log to prevent data corruption");
-            Serial.println("   Make sure you include command_timestamp in your Firebase settings update");
+            Serial.println("⚠️ WARNING: command_timestamp is 0 - skipping latency log to prevent data corruption");
             return;
         }
         
-        // Get current server time (epoch in milliseconds)
         uint64_t executedTimestamp = (uint64_t)time(nullptr) * 1000;
         
-        // Calculate FULL latency: from command sent to IR transmitted
         uint64_t fullLatencyMs = 0;
-        uint64_t pollingWaitMs = 0;
+        uint64_t pollingWaitMs = 0; 
+        
         if (commandTimestamp > 0) {
             fullLatencyMs = executedTimestamp - commandTimestamp;
-            // Polling wait = total latency - network - processing
-            // (everything else is waiting for next check interval)
             if (fullLatencyMs > (networkLatencyMs + processingTimeMs)) {
-                pollingWaitMs = fullLatencyMs - networkLatencyMs - processingTimeMs;
+                pollingWaitMs = fullLatencyMs - networkLatencyMs - processingTimeMs; 
             }
         }
         
-        // Create confirmation data
         FirebaseJson confirmData;
         confirmData.set("command_timestamp", (double)commandTimestamp);
         confirmData.set("executed_timestamp", (double)executedTimestamp);
@@ -162,20 +192,16 @@ void logLatencyConfirmation(unsigned long processingTimeMs, uint64_t commandTime
         confirmData.set("full_latency_ms", (double)fullLatencyMs);
         confirmData.set("confirmed_at", (unsigned long)time(nullptr));
         
-        // Write to Firebase
         String confirmPath = userPath;
         confirmPath += "/last_execution";
         
         if (Firebase.setJSON(fbdo, confirmPath.c_str(), confirmData)) {
-            Serial.printf("✓ Latency confirmation sent to Firebase\n");
-            Serial.printf("  Command Timestamp: %llu ms (from Firebase)\n", commandTimestamp);
-            Serial.printf("  Executed Timestamp: %llu ms\n", executedTimestamp);
-            Serial.printf("  Polling Wait: %llu ms (ESP32 check interval delay)\n", pollingWaitMs);
-            Serial.printf("  Network Latency: %lu ms\n", networkLatencyMs);
-            Serial.printf("  ESP32 Processing: %lu ms\n", processingTimeMs);
-            Serial.printf("  FULL SYSTEM LATENCY: %llu ms (Command → IR)\n", fullLatencyMs);
+            Serial.printf("✓ Log Latency Stream berhasil diunggah\n");
+            Serial.printf("  Propagasi Jaringan (Aplikasi -> ESP32): %llu ms\n", pollingWaitMs);
+            Serial.printf("  Waktu Eksekusi Lokal ESP32: %lu ms\n", processingTimeMs);
+            Serial.printf("  TOTAL LATENSI END-TO-END: %llu ms\n", fullLatencyMs);
         } else {
-            Serial.printf("✗ Failed to log confirmation: %s\n", fbdo.errorReason().c_str());
+            Serial.printf("✗ Gagal upload latency: %s\n", fbdo.errorReason().c_str());
         }
     }
 }
