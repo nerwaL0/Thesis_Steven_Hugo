@@ -9,6 +9,8 @@ void setupNetwork();
 // Fungsi untuk mengecek apakah tombol BOOT ditahan untuk reset
 void checkResetButton();
 
+void maintainWiFiConnection(); // Fungsi untuk memastikan koneksi WiFi tetap stabil
+
 // Fungsi untuk mendapatkan ID unik (MAC Address)
 String getDeviceID();
 

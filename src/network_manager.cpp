@@ -10,7 +10,7 @@ const int LED_R = 25;
 const int LED_G = 26;
 const int LED_B = 27;
 
-const int RESET_PIN = 0;
+const int RESET_PIN = 33;
 unsigned long pressStartTime = 0;
 bool isPressing    = false;
 int currentBlinkPhase = -1; // -1: Normal, 0-2: Button hold progress, 3: Reset
@@ -151,6 +151,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     wm.setCustomHeadElement(custom_html);
 
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(true);
+
     // Autoconnect akan memblokir sampai terhubung atau timeout
     if (!wm.autoConnect("SmartRemote_Setup")) {
         Serial.println("Gagal terhubung, restarting...");
@@ -209,6 +212,30 @@ void checkResetButton() {
     }
 }
 
+void maintainWiFiConnection() {
+    static unsigned long lastWiFiCheck = 0;
+    if (millis() - lastWiFiCheck < 1000) return;
+    lastWiFiCheck = millis();
+
+    if (WiFi.status() != WL_CONNECTED && !isPressing) {
+        if (wifiConnected) {
+            wifiConnected = false;
+            Serial.println("Koneksi WiFi terputus! Mencoba reconnect...");
+            
+            ticker.detach();
+            ticker.attach(0.5, tickRed); // Blinking red while trying to reconnect
+        }
+    }
+    else if (WiFi.status() == WL_CONNECTED && !wifiConnected) {
+        wifiConnected = true;
+        Serial.println("Koneksi WiFi berhasil dipulihkan!");
+        
+        ticker.detach();
+        toggleState = false;
+        setColor(false, true, false); // Solid green when reconnected
+        Serial.println("Terhubung ke WiFi!");
+    }
+}
 // ── Device ID ────────────────────────────────────────────────────────────────
 String getDeviceID() {
     String mac = WiFi.macAddress();

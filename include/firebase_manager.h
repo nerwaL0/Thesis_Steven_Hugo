@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-// Fungsi utama untuk inisialisasi dan pengecekan data
+void streamTimeoutCallback(bool timeout);
 void setupFirebase();
 void handleFirebaseUpdates();
 void uploadSensorData(float temp, float hum);

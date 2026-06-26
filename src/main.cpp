@@ -10,11 +10,13 @@ void setup() {
     setupAC();
     setupNetwork();   // Inisialisasi WiFi Manager
     setupFirebase();  // Inisialisasi Firebase & Path
+
     
 }
 
 void loop() {
-    checkResetButton();      // Cek tombol reset WiFi
-    handleFirebaseUpdates(); // Cek dan eksekusi perintah dari Firebase
-    readAndUploadSensor();   // Baca sensor dan upload ke Firebase setiap 2 menit
+    checkResetButton();      
+    handleFirebaseUpdates(); 
+    readAndUploadSensor();   
+    maintainWiFiConnection(); 
 }

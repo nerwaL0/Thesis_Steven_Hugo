@@ -5,27 +5,26 @@
 #include "network_manager.h"
 #include <time.h>
 
-FirebaseData fbdo;
-FirebaseData streamData; // Objek khusus agar jalur Stream tidak bertabrakan dengan upload sensor
+FirebaseData fbdo; 
+FirebaseData streamData; 
 FirebaseAuth auth;
 FirebaseConfig config;
-
 String userPath;
 
-// Variabel status terakhir
+
 int lastProtocol = -1, lastTemp = -1, lastFan = -1, lastMode = -1;
 bool lastPower = false, lastSwing = false, isFirstRun = true;
 
-// REVISI: Inisialisasi struct dengan nilai default 0 untuk mencegah angka gaib
+
 struct ACCommand {
     bool ready = false;
     uint64_t timestamp = 0;
     int protocol = 0;
     bool power = false;
-    int temp = 24; // Default suhu aman
+    int temp = 24;
     int fan = 0;
     bool swing = false;
-    int mode = 1;  // Default Cool
+    int mode = 1;
     unsigned long received_time = 0;
 } currentCmd;
 
@@ -65,6 +64,7 @@ void setupFirebase() {
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
     
+    
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     Serial.println("Syncing with NTP server...");
     time_t now = time(nullptr);
@@ -87,7 +87,6 @@ void handleFirebaseUpdates() {
     // Fungsi ini dipanggil ribuan kali per detik oleh loop(), tetapi hanya berjalan jika ada flag 'ready'
     if (currentCmd.ready) {
         currentCmd.ready = false; 
-        
         unsigned long t_before = millis();
 
        if (Firebase.getJSON(fbdo, userPath.c_str())) {
@@ -122,8 +121,7 @@ void handleFirebaseUpdates() {
 }
 void uploadSensorData(float temp, float hum) {
     // BUAT PATH BARU KHUSUS SENSOR (Pisahkan dari userPath/settings)
-    String sensorPath = "/devices/" + getDeviceID() + "/sensors"; 
-
+   String sensorPath = "/devices/" + getDeviceID() + "/sensors"; 
     if (Firebase.ready()) {
         if (Firebase.setFloat(fbdo, sensorPath + "/read_temp", temp)) {
             Serial.println(F("Data Suhu berhasil diunggah."));
