@@ -4,12 +4,12 @@
 #include "firebase_manager.h"
 #include <time.h>
 
-#include <ir_Daikin.h> //14
-#include <ir_Panasonic.h> //3
-#include <ir_Sharp.h> //27
-#include <ir_LG.h> //6
-#include <ir_Samsung.h> //11
-#include <ir_Gree.h> //32
+#include <ir_Daikin.h> //16
+#include <ir_Panasonic.h> //5
+#include <ir_Sharp.h> //14
+#include <ir_LG.h> //10
+#include <ir_Samsung.h> //7
+#include <ir_Gree.h> //24
 
 const uint16_t kIrLed = 14;
 
@@ -39,7 +39,7 @@ void tembakSinyalAC(
     unsigned long t_before_send, t_after_send;
 
     switch (id) {
-        case 14: { // DAIKIN
+        case 16: { // DAIKIN
             if (powerStatus) {
                 acDaikin.on();
                 acDaikin.setTemp(temp);
@@ -65,7 +65,7 @@ void tembakSinyalAC(
             Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
         }
-        case 3: { // PANASONIC
+        case 5: { // PANASONIC
             if (powerStatus) {
                 acPanasonic.on();
                 acPanasonic.setTemp(temp);
@@ -91,7 +91,7 @@ void tembakSinyalAC(
             Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
         }
-        case 27: { // SHARP
+        case 14: { // SHARP
             if (powerStatus) {
                 acSharp.on();
                 acSharp.setMode(kSharpAcCool); 
@@ -119,7 +119,7 @@ void tembakSinyalAC(
             Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
         }
-        case 6: { // LG
+        case 10: { // LG
             if (powerStatus) {
                 acLG.on();
                 acLG.setMode(kLgAcCool); 
@@ -146,7 +146,7 @@ void tembakSinyalAC(
             Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
         }
-        case 11: { // SAMSUNG
+        case 7: { // SAMSUNG
             if (powerStatus) {
                 acSamsung.on();
                 acSamsung.setMode(kSamsungAcCool);
@@ -173,7 +173,7 @@ void tembakSinyalAC(
             Serial.printf("  Total Firebase→IR: %lu ms\n", t_after_send - startTime);
             break;
         }
-        case 32: { // GREE
+        case 24: { // GREE
             if (powerStatus) {
                 acGree.on();
                 acGree.setMode(kGreeCool);
